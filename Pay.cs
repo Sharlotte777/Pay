@@ -11,9 +11,9 @@ public class Pay : MonoBehaviour
         {
             Order order = new Order(1, 12000);
 
-            IPaymentSystem loggedPaymentSystem1 = new LoggingDecorator(new PaymentSystem1());
-            IPaymentSystem loggedPaymentSystem2 = new LoggingDecorator(new PaymentSystem2());
-            IPaymentSystem loggedPaymentSystem3 = new LoggingDecorator(new PaymentSystem3("secret_key"));
+            IPaymentSystem loggedPaymentSystem1 = new PaymentSystem1();
+            IPaymentSystem loggedPaymentSystem2 = new PaymentSystem2();
+            IPaymentSystem loggedPaymentSystem3 = new PaymentSystem3("secret_key");
 
             Console.WriteLine(loggedPaymentSystem1.GetPayingLink(order));
             Console.WriteLine(loggedPaymentSystem2.GetPayingLink(order));
@@ -29,12 +29,23 @@ public class Pay : MonoBehaviour
         public Order(int id, int amount) => (Id, Amount) = (id, amount);
     }
 
-    public abstract class PaymentSystemBase : IPaymentSystem
+    public interface IPaymentSystem
     {
-        public abstract string GetPayingLink(Order order);
+        string GetPayingLink(Order order);
+    }
 
-        protected string CalculateMD5Hash(string input)
+    public interface IHashAlgorithm
+    {
+        string ComputeHash(string input);
+    }
+
+    public class MD5HashAlgorithm : IHashAlgorithm
+    {
+        public string ComputeHash(string input)
         {
+            if (string.IsNullOrWhiteSpace(input))
+                throw new ArgumentException("Input cannot be null or whitespace.", nameof(input));
+
             using (MD5 md5 = MD5.Create())
             {
                 byte[] inputBytes = Encoding.UTF8.GetBytes(input);
@@ -42,9 +53,15 @@ public class Pay : MonoBehaviour
                 return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
             }
         }
+    }
 
-        protected string CalculateSHA1Hash(string input)
+    public class SHA1HashAlgorithm : IHashAlgorithm
+    {
+        public string ComputeHash(string input)
         {
+            if (string.IsNullOrWhiteSpace(input))
+                throw new ArgumentException("Input cannot be null or whitespace.", nameof(input));
+
             using (SHA1 sha1 = SHA1.Create())
             {
                 byte[] inputBytes = Encoding.UTF8.GetBytes(input);
@@ -54,59 +71,56 @@ public class Pay : MonoBehaviour
         }
     }
 
-    public class PaymentSystem1 : PaymentSystemBase
+    public class PaymentSystem1 : IPaymentSystem
     {
-        public override string GetPayingLink(Order order)
+        private readonly IHashAlgorithm _hashAlgorithm;
+
+        public PaymentSystem1()
         {
-            string hash = CalculateMD5Hash(order.Id.ToString());
-            return $"https://pay.system1.ru/order?amount={order.Amount}RUB&hash={hash}";
-        }
-    }
-
-    public class PaymentSystem2 : PaymentSystemBase
-    {
-        public override string GetPayingLink(Order order)
-        {
-            string hash = CalculateMD5Hash(order.Id.ToString() + order.Amount.ToString());
-            return $"https://order.system2.ru/pay?hash={hash}";
-        }
-    }
-
-    public class PaymentSystem3 : PaymentSystemBase
-    {
-        private readonly string _secretKey;
-
-        public PaymentSystem3(string secretKey)
-        {
-            _secretKey = secretKey;
-        }
-
-        public override string GetPayingLink(Order order)
-        {
-            string hash = CalculateSHA1Hash(order.Amount.ToString() + order.Id.ToString() + _secretKey);
-            return $"https://system3.com/pay?amount={order.Amount}&currency=RUB&hash={hash}";
-        }
-    }
-
-    public interface IPaymentSystem
-    {
-        string GetPayingLink(Order order);
-    }
-
-    public class LoggingDecorator : IPaymentSystem
-    {
-        private readonly IPaymentSystem _paymentSystem;
-
-        public LoggingDecorator(IPaymentSystem paymentSystem)
-        {
-            _paymentSystem = paymentSystem;
+            _hashAlgorithm = new MD5HashAlgorithm();
         }
 
         public string GetPayingLink(Order order)
         {
-            Console.WriteLine($"Создание ссылки для заказа ID: {order.Id}, сумма: {order.Amount}");
+            string hash = _hashAlgorithm.ComputeHash(order.Id.ToString());
+            return $"https://pay.system1.ru/order?amount={order.Amount}RUB&hash={hash}";
+        }
+    }
 
-            return _paymentSystem.GetPayingLink(order);
+    public class PaymentSystem2 : IPaymentSystem
+    {
+        private readonly IHashAlgorithm _hashAlgorithm;
+
+        public PaymentSystem2()
+        {
+            _hashAlgorithm = new MD5HashAlgorithm();
+        }
+
+        public string GetPayingLink(Order order)
+        {
+            string hash = _hashAlgorithm.ComputeHash(order.Id.ToString() + order.Amount.ToString());
+            return $"https://order.system2.ru/pay?hash={hash}";
+        }
+    }
+
+    public class PaymentSystem3 : IPaymentSystem
+    {
+        private readonly string _secretKey;
+        private readonly IHashAlgorithm _hashAlgorithm;
+
+        public PaymentSystem3(string secretKey)
+        {
+            if (string.IsNullOrWhiteSpace(secretKey))
+                throw new ArgumentException("Secret key cannot be null or whitespace.", nameof(secretKey));
+
+            _secretKey = secretKey;
+            _hashAlgorithm = new SHA1HashAlgorithm();
+        }
+
+        public string GetPayingLink(Order order)
+        {
+            string hash = _hashAlgorithm.ComputeHash(order.Amount.ToString() + order.Id.ToString() + _secretKey);
+            return $"https://system3.com/pay?amount={order.Amount}&currency=RUB&hash={hash}";
         }
     }
 }
